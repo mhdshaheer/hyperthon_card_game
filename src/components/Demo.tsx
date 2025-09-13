@@ -1,21 +1,29 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, MouseEvent } from 'react'
 import { ethers } from 'ethers'
+
+type Card = {
+  row: number
+  col: number
+  value: number | string
+  flipped: boolean
+  matched: boolean
+}
 
 export default function Demo() {
   /** WALLET **/
   const [providerAddress, setProviderAddress] = useState<string | null>(null)
 
   /** GAME STATE **/
-  const [cards, setCards] = useState<any[]>([])
-  const [flipped, setFlipped] = useState<any[]>([])
-  const [matchedCount, setMatchedCount] = useState(0)
-  const [elapsed, setElapsed] = useState(0)
-  const [moves, setMoves] = useState(0)
-  const [points, setPoints] = useState(0)
-  const [running, setRunning] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
+  const [cards, setCards] = useState<Card[]>([])
+  const [flipped, setFlipped] = useState<Card[]>([])
+  const [matchedCount, setMatchedCount] = useState<number>(0)
+  const [elapsed, setElapsed] = useState<number>(0)
+  const [moves, setMoves] = useState<number>(0)
+  const [points, setPoints] = useState<number>(0)
+  const [running, setRunning] = useState<boolean>(false)
+  const [submitted, setSubmitted] = useState<boolean>(false)
   const [savedPoints, setSavedPoints] = useState<number | null>(null)
-  const [totalScore, setTotalScore] = useState(0) // cumulative across rounds
+  const [totalScore, setTotalScore] = useState<number>(0)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const timerRef = useRef<number | null>(null)
@@ -23,10 +31,10 @@ export default function Demo() {
 
   const rows = 4
   const cols = 4
-  const [cardSize, setCardSize] = useState(120)
+  const [cardSize, setCardSize] = useState<number>(120)
 
   /** WALLET FUNCTIONS **/
-  async function connectWallet() {
+  const connectWallet = async (): Promise<void> => {
     if (typeof window === 'undefined' || !window.ethereum) {
       return alert('MetaMask not found. Install from https://metamask.io/')
     }
@@ -40,36 +48,13 @@ export default function Demo() {
     }
   }
 
-  function disconnectWallet() {
+  const disconnectWallet = (): void => {
     setProviderAddress(null)
     alert('Wallet disconnected')
   }
 
   /** GAME FUNCTIONS **/
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    setCardSize(Math.floor(canvas.width / cols))
-    resetGame()
-  }, [])
-
-  useEffect(() => drawCards(), [cards])
-
-  function createCards() {
-    const total = rows * cols
-    let vals: number[] = []
-    for (let i = 1; i <= total / 2; i++) vals.push(i, i)
-    vals.sort(() => Math.random() - 0.5)
-    const arr: any[] = []
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        arr.push({ value: vals.pop(), row: r, col: c, flipped: false, matched: false })
-      }
-    }
-    return arr
-  }
-
-  function resetGame() {
+  const resetGame = (): void => {
     stopTimer()
     const arr = createCards()
     setCards(arr)
@@ -83,25 +68,39 @@ export default function Demo() {
     setSavedPoints(null)
   }
 
-  function startGame() {
+  const startGame = (): void => {
     resetGame()
     setRunning(true)
     startTimer()
   }
 
-  function startTimer() {
+  const startTimer = (): void => {
     startRef.current = Date.now()
     timerRef.current = window.setInterval(() => {
-      setElapsed(((Date.now() - startRef.current) / 1000).toFixed(1) as unknown as number)
+      setElapsed(Number(((Date.now() - startRef.current) / 1000).toFixed(1)))
     }, 100)
   }
 
-  function stopTimer() {
+  const stopTimer = (): void => {
     if (timerRef.current !== null) window.clearInterval(timerRef.current)
     timerRef.current = null
   }
 
-  function drawCards() {
+  const createCards = (): Card[] => {
+    const total = rows * cols
+    const vals: number[] = []
+    for (let i = 1; i <= total / 2; i++) vals.push(i, i)
+    vals.sort(() => Math.random() - 0.5)
+    const arr: Card[] = []
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        arr.push({ value: vals.pop()!, row: r, col: c, flipped: false, matched: false })
+      }
+    }
+    return arr
+  }
+
+  const drawCards = (): void => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
@@ -122,13 +121,13 @@ export default function Demo() {
     })
   }
 
-  function getCardAt(x: number, y: number) {
+  const getCardAt = (x: number, y: number): Card | undefined => {
     const col = Math.floor(x / cardSize)
     const row = Math.floor(y / cardSize)
     return cards.find(c => c.row === row && c.col === col)
   }
 
-  function handleCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
+  const handleCanvasClick = (e: MouseEvent<HTMLCanvasElement>): void => {
     if (!running) return
     const rect = canvasRef.current!.getBoundingClientRect()
     const x = e.clientX - rect.left
@@ -136,7 +135,7 @@ export default function Demo() {
     const card = getCardAt(x, y)
     if (!card || card.flipped || card.matched) return
 
-    const copy = cards.slice()
+    const copy = [...cards]
     const idx = copy.indexOf(card)
     copy[idx] = { ...card, flipped: true }
     setCards(copy)
@@ -150,9 +149,9 @@ export default function Demo() {
     }
   }
 
-  function checkMatch(pair: any[]) {
+  const checkMatch = (pair: Card[]): void => {
     const [a, b] = pair
-    const copy = cards.slice()
+    const copy = [...cards]
     if (a.value === b.value) {
       copy.forEach(c => {
         if ((c.row === a.row && c.col === a.col) || (c.row === b.row && c.col === b.col)) {
@@ -162,12 +161,10 @@ export default function Demo() {
       setCards(copy)
       setMatchedCount(prev => prev + 2)
 
-      // Add points for matched pair (5 per card = 10)
       const newPoints = points + 10
       setPoints(newPoints)
-      setTotalScore(prev => prev + 10) // total score updates live
+      setTotalScore(prev => prev + 10)
 
-      // Auto-submit on finish
       if (matchedCount + 2 === rows * cols && !submitted) {
         stopTimer()
         setRunning(false)
@@ -184,11 +181,22 @@ export default function Demo() {
     setFlipped([])
   }
 
+  /** EFFECTS **/
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    setCardSize(Math.floor(canvas.width / cols))
+    resetGame()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => drawCards(), [cards, cardSize])
+
+  /** RENDER **/
   return (
     <div style={{ maxWidth: 800, margin: '24px auto', textAlign: 'center' }}>
       <h1>🎴 Memory Card Game — Demo</h1>
 
-      {/* Wallet */}
       {providerAddress ? (
         <div>
           Wallet: {providerAddress.slice(0, 6)}...{providerAddress.slice(-4)}{' '}
@@ -202,7 +210,6 @@ export default function Demo() {
         </button>
       )}
 
-      {/* Canvas */}
       <canvas
         ref={canvasRef}
         width={cols * cardSize}
@@ -211,7 +218,6 @@ export default function Demo() {
         onClick={handleCanvasClick}
       />
 
-      {/* Stats */}
       <div style={{ marginBottom: 16 }}>
         <span style={{ marginRight: 16 }}>Time: {elapsed}s</span>
         <span style={{ marginRight: 16 }}>Moves: {moves}</span>
@@ -219,7 +225,6 @@ export default function Demo() {
         <span style={{ fontWeight: 'bold' }}>Total Score: {totalScore}</span>
       </div>
 
-      {/* Controls */}
       <div>
         <button style={buttonStyle} onClick={startGame}>
           Start Game
@@ -244,7 +249,6 @@ export default function Demo() {
         </button>
       </div>
 
-      {/* Saved Points */}
       {savedPoints !== null && (
         <div style={{ marginTop: 16, fontWeight: 'bold' }}>Saved Points: {savedPoints}</div>
       )}
