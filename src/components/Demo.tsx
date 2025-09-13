@@ -1,507 +1,263 @@
-"use client";
+import { useEffect, useRef, useState } from 'react'
+import { ethers } from 'ethers'
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  useAccount,
-  useSendTransaction,
-  useSignMessage,
-  useSignTypedData,
-  useWaitForTransactionReceipt,
-  useDisconnect,
-  useConnect,
-  useSwitchChain,
-  useChainId,
-} from "wagmi";
+export default function Demo() {
+  /** WALLET **/
+  const [providerAddress, setProviderAddress] = useState<string | null>(null)
 
-import { ShareButton } from "./ui/Share";
+  /** GAME STATE **/
+  const [cards, setCards] = useState<any[]>([])
+  const [flipped, setFlipped] = useState<any[]>([])
+  const [matchedCount, setMatchedCount] = useState(0)
+  const [elapsed, setElapsed] = useState(0)
+  const [moves, setMoves] = useState(0)
+  const [points, setPoints] = useState(0)
+  const [running, setRunning] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  const [savedPoints, setSavedPoints] = useState<number | null>(null)
+  const [totalScore, setTotalScore] = useState(0) // cumulative across rounds
 
-import { config } from "~/components/providers/WagmiProvider";
-import { Button } from "~/components/ui/Button";
-import { truncateAddress } from "~/lib/truncateAddress";
-import { base, degen, mainnet, optimism, unichain } from "wagmi/chains";
-import { BaseError, UserRejectedRequestError } from "viem";
-import { useMiniApp } from "@neynar/react";
-import { Header } from "~/components/ui/Header";
-import { Footer } from "~/components/ui/Footer";
-import { USE_WALLET, APP_NAME } from "~/lib/constants";
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const timerRef = useRef<number | null>(null)
+  const startRef = useRef<number>(0)
 
-export type Tab = "home" | "actions" | "context" | "wallet";
+  const rows = 4
+  const cols = 4
+  const [cardSize, setCardSize] = useState(120)
 
-interface NeynarUser {
-  fid: number;
-  score: number;
-}
-
-export default function Demo(
-  { title }: { title?: string } = { title: "Frames v2 Demo" }
-) {
-  const { isSDKLoaded, context, added, notificationDetails, actions } =
-    useMiniApp();
-  const [activeTab, setActiveTab] = useState<Tab>("home");
-  const [txHash, setTxHash] = useState<string | null>(null);
-  const [sendNotificationResult, setSendNotificationResult] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [neynarUser, setNeynarUser] = useState<NeynarUser | null>(null);
-
-  const { address, isConnected } = useAccount();
-  const chainId = useChainId();
-
-  useEffect(() => {
-    console.log("isSDKLoaded", isSDKLoaded);
-    console.log("context", context);
-    console.log("address", address);
-    console.log("isConnected", isConnected);
-    console.log("chainId", chainId);
-  }, [context, address, isConnected, chainId, isSDKLoaded]);
-
-  // Fetch Neynar user object when context is available
-  useEffect(() => {
-    const fetchNeynarUserObject = async () => {
-      if (context?.user?.fid) {
-        try {
-          const response = await fetch(`/api/users?fids=${context.user.fid}`);
-          const data = await response.json();
-          if (data.users?.[0]) {
-            setNeynarUser(data.users[0]);
-          }
-        } catch (error) {
-          console.error("Failed to fetch Neynar user object:", error);
-        }
-      }
-    };
-
-    fetchNeynarUserObject();
-  }, [context?.user?.fid]);
-
-  const {
-    sendTransaction,
-    error: sendTxError,
-    isError: isSendTxError,
-    isPending: isSendTxPending,
-  } = useSendTransaction();
-
-  const { isLoading: isConfirming, isSuccess: isConfirmed } =
-    useWaitForTransactionReceipt({
-      hash: txHash as `0x${string}`,
-    });
-
-  const {
-    signTypedData,
-    error: signTypedError,
-    isError: isSignTypedError,
-    isPending: isSignTypedPending,
-  } = useSignTypedData();
-
-  const { disconnect } = useDisconnect();
-  const { connect, connectors } = useConnect();
-
-  const {
-    switchChain,
-    error: switchChainError,
-    isError: isSwitchChainError,
-    isPending: isSwitchChainPending,
-  } = useSwitchChain();
-
-  const nextChain = useMemo(() => {
-    if (chainId === base.id) {
-      return optimism;
-    } else if (chainId === optimism.id) {
-      return degen;
-    } else if (chainId === degen.id) {
-      return mainnet;
-    } else if (chainId === mainnet.id) {
-      return unichain;
-    } else {
-      return base;
+  /** WALLET FUNCTIONS **/
+  async function connectWallet() {
+    if (typeof window === 'undefined' || !window.ethereum) {
+      return alert('MetaMask not found. Install from https://metamask.io/')
     }
-  }, [chainId]);
-
-  const handleSwitchChain = useCallback(() => {
-    switchChain({ chainId: nextChain.id });
-  }, [switchChain, nextChain.id]);
-
-  const sendNotification = useCallback(async () => {
-    setSendNotificationResult("");
-    if (!notificationDetails || !context) {
-      return;
-    }
-
     try {
-      const response = await fetch("/api/send-notification", {
-        method: "POST",
-        mode: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fid: context.user.fid,
-          notificationDetails,
-        }),
-      });
-
-      if (response.status === 200) {
-        setSendNotificationResult("Success");
-        return;
-      } else if (response.status === 429) {
-        setSendNotificationResult("Rate limited");
-        return;
-      }
-
-      const data = await response.text();
-      setSendNotificationResult(`Error: ${data}`);
-    } catch (error) {
-      setSendNotificationResult(`Error: ${error}`);
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      await provider.send('eth_requestAccounts', [])
+      const signer = await provider.getSigner()
+      setProviderAddress(await signer.getAddress())
+    } catch (e: any) {
+      alert('Wallet connection failed: ' + e.message)
     }
-  }, [context, notificationDetails]);
+  }
 
-  const sendTx = useCallback(() => {
-    sendTransaction(
-      {
-        // call yoink() on Yoink contract
-        to: "0x4bBFD120d9f352A0BEd7a014bd67913a2007a878",
-        data: "0x9846cd9efc000023c0",
-      },
-      {
-        onSuccess: (hash) => {
-          setTxHash(hash);
-        },
+  function disconnectWallet() {
+    setProviderAddress(null)
+    alert('Wallet disconnected')
+  }
+
+  /** GAME FUNCTIONS **/
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    setCardSize(Math.floor(canvas.width / cols))
+    resetGame()
+  }, [])
+
+  useEffect(() => drawCards(), [cards])
+
+  function createCards() {
+    const total = rows * cols
+    let vals: number[] = []
+    for (let i = 1; i <= total / 2; i++) vals.push(i, i)
+    vals.sort(() => Math.random() - 0.5)
+    const arr: any[] = []
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        arr.push({ value: vals.pop(), row: r, col: c, flipped: false, matched: false })
       }
-    );
-  }, [sendTransaction]);
+    }
+    return arr
+  }
 
-  const signTyped = useCallback(() => {
-    signTypedData({
-      domain: {
-        name: APP_NAME,
-        version: "1",
-        chainId,
-      },
-      types: {
-        Message: [{ name: "content", type: "string" }],
-      },
-      message: {
-        content: `Hello from ${APP_NAME}!`,
-      },
-      primaryType: "Message",
-    });
-  }, [chainId, signTypedData]);
+  function resetGame() {
+    stopTimer()
+    const arr = createCards()
+    setCards(arr)
+    setFlipped([])
+    setMatchedCount(0)
+    setMoves(0)
+    setElapsed(0)
+    setPoints(0)
+    setRunning(false)
+    setSubmitted(false)
+    setSavedPoints(null)
+  }
 
-  if (!isSDKLoaded) {
-    return <div>Loading...</div>;
+  function startGame() {
+    resetGame()
+    setRunning(true)
+    startTimer()
+  }
+
+  function startTimer() {
+    startRef.current = Date.now()
+    timerRef.current = window.setInterval(() => {
+      setElapsed(((Date.now() - startRef.current) / 1000).toFixed(1) as unknown as number)
+    }, 100)
+  }
+
+  function stopTimer() {
+    if (timerRef.current !== null) window.clearInterval(timerRef.current)
+    timerRef.current = null
+  }
+
+  function drawCards() {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    cards.forEach(card => {
+      const x = card.col * cardSize
+      const y = card.row * cardSize
+      ctx.fillStyle = card.flipped || card.matched ? '#4CAF50' : '#555'
+      ctx.fillRect(x + 6, y + 6, cardSize - 12, cardSize - 12)
+      if (card.flipped || card.matched) {
+        ctx.fillStyle = 'white'
+        ctx.font = `${Math.floor(cardSize / 3)}px Arial`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(String(card.value), x + cardSize / 2, y + cardSize / 2)
+      }
+    })
+  }
+
+  function getCardAt(x: number, y: number) {
+    const col = Math.floor(x / cardSize)
+    const row = Math.floor(y / cardSize)
+    return cards.find(c => c.row === row && c.col === col)
+  }
+
+  function handleCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!running) return
+    const rect = canvasRef.current!.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const card = getCardAt(x, y)
+    if (!card || card.flipped || card.matched) return
+
+    const copy = cards.slice()
+    const idx = copy.indexOf(card)
+    copy[idx] = { ...card, flipped: true }
+    setCards(copy)
+
+    const newFlipped = [...flipped, copy[idx]]
+    setFlipped(newFlipped)
+
+    if (newFlipped.length === 2) {
+      setMoves(prev => prev + 1)
+      setTimeout(() => checkMatch(newFlipped), 700)
+    }
+  }
+
+  function checkMatch(pair: any[]) {
+    const [a, b] = pair
+    const copy = cards.slice()
+    if (a.value === b.value) {
+      copy.forEach(c => {
+        if ((c.row === a.row && c.col === a.col) || (c.row === b.row && c.col === b.col)) {
+          c.matched = true
+        }
+      })
+      setCards(copy)
+      setMatchedCount(prev => prev + 2)
+
+      // Add points for matched pair (5 per card = 10)
+      const newPoints = points + 10
+      setPoints(newPoints)
+      setTotalScore(prev => prev + 10) // total score updates live
+
+      // Auto-submit on finish
+      if (matchedCount + 2 === rows * cols && !submitted) {
+        stopTimer()
+        setRunning(false)
+        setSavedPoints(newPoints)
+        setSubmitted(true)
+        alert(`All cards solved! Points saved: ${newPoints}`)
+      }
+    } else {
+      copy.forEach(c => {
+        if ((c.row === a.row && c.col === a.col) || (c.row === b.row && c.col === b.col)) c.flipped = false
+      })
+      setCards(copy)
+    }
+    setFlipped([])
   }
 
   return (
-    <div
-      style={{
-        paddingTop: context?.client.safeAreaInsets?.top ?? 0,
-        paddingBottom: context?.client.safeAreaInsets?.bottom ?? 0,
-        paddingLeft: context?.client.safeAreaInsets?.left ?? 0,
-        paddingRight: context?.client.safeAreaInsets?.right ?? 0,
-      }}
-    >
-      <div className="mx-auto py-2 px-4 pb-20">
-        <Header neynarUser={neynarUser} />
+    <div style={{ maxWidth: 800, margin: '24px auto', textAlign: 'center' }}>
+      <h1>🎴 Memory Card Game — Demo</h1>
 
-        <h1 className="text-2xl font-bold text-center mb-4">{title}</h1>
+      {/* Wallet */}
+      {providerAddress ? (
+        <div>
+          Wallet: {providerAddress.slice(0, 6)}...{providerAddress.slice(-4)}{' '}
+          <button style={{ ...buttonStyle, background: '#f44336' }} onClick={disconnectWallet}>
+            Disconnect
+          </button>
+        </div>
+      ) : (
+        <button style={buttonStyle} onClick={connectWallet}>
+          Connect Wallet
+        </button>
+      )}
 
-        {activeTab === "home" && (
-          <div className="flex items-center justify-center h-[calc(100vh-200px)] px-6">
-            <div className="text-center w-full max-w-md mx-auto">
-              <p className="text-lg mb-2">Put your content here!</p>
-              <p className="text-sm text-gray-500">Powered by Neynar 🪐</p>
-            </div>
-          </div>
-        )}
+      {/* Canvas */}
+      <canvas
+        ref={canvasRef}
+        width={cols * cardSize}
+        height={rows * cardSize}
+        style={{ border: '2px solid #ddd', borderRadius: 12, margin: '16px 0' }}
+        onClick={handleCanvasClick}
+      />
 
-        {activeTab === "actions" && (
-          <div className="space-y-3 px-6 w-full max-w-md mx-auto">
-            <ShareButton
-              buttonText="Share Mini App"
-              cast={{
-                text: "Check out this awesome frame @1 @2 @3! 🚀🪐",
-                bestFriends: true,
-                embeds: [
-                  `${process.env.NEXT_PUBLIC_URL}/share/${
-                    context?.user?.fid || ""
-                  }`,
-                ],
-              }}
-              className="w-full"
-            />
-
-            <Button
-              onClick={() =>
-                actions.openUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-              }
-              className="w-full"
-            >
-              Open Link
-            </Button>
-
-            <Button onClick={actions.close} className="w-full">
-              Close Mini App
-            </Button>
-
-            <Button
-              onClick={actions.addMiniApp}
-              disabled={added}
-              className="w-full"
-            >
-              Add Mini App to Client
-            </Button>
-
-            {sendNotificationResult && (
-              <div className="text-sm w-full">
-                Send notification result: {sendNotificationResult}
-              </div>
-            )}
-            <Button
-              onClick={sendNotification}
-              disabled={!notificationDetails}
-              className="w-full"
-            >
-              Send notification
-            </Button>
-
-            <Button
-              onClick={async () => {
-                if (context?.user?.fid) {
-                  const shareUrl = `${process.env.NEXT_PUBLIC_URL}/share/${context.user.fid}`;
-                  await navigator.clipboard.writeText(shareUrl);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }
-              }}
-              disabled={!context?.user?.fid}
-              className="w-full"
-            >
-              {copied ? "Copied!" : "Copy share URL"}
-            </Button>
-          </div>
-        )}
-
-        {activeTab === "context" && (
-          <div className="mx-6">
-            <h2 className="text-lg font-semibold mb-2 text-foreground">
-              Context
-            </h2>
-            <div className="p-4 bg-card text-card-foreground rounded-lg border border-border">
-              <pre className="font-mono text-xs whitespace-pre-wrap break-words w-full">
-                {JSON.stringify(context, null, 2)}
-              </pre>
-            </div>
-          </div>
-        )}
-
-        {activeTab === "wallet" && USE_WALLET && (
-          <div className="space-y-3 px-6 w-full max-w-md mx-auto">
-            {address && (
-              <div className="text-xs w-full">
-                Address:{" "}
-                <pre className="inline w-full">{truncateAddress(address)}</pre>
-              </div>
-            )}
-
-            {chainId && (
-              <div className="text-xs w-full">
-                Chain ID: <pre className="inline w-full">{chainId}</pre>
-              </div>
-            )}
-
-            {isConnected ? (
-              <Button onClick={() => disconnect()} className="w-full">
-                Disconnect
-              </Button>
-            ) : context ? (
-              <Button
-                onClick={() => connect({ connector: connectors[0] })}
-                className="w-full"
-              >
-                Connect
-              </Button>
-            ) : (
-              <div className="space-y-3 w-full">
-                <Button
-                  onClick={() => connect({ connector: connectors[1] })}
-                  className="w-full"
-                >
-                  Connect Coinbase Wallet
-                </Button>
-                <Button
-                  onClick={() => connect({ connector: connectors[2] })}
-                  className="w-full"
-                >
-                  Connect MetaMask
-                </Button>
-              </div>
-            )}
-
-            <SignEvmMessage />
-
-            {isConnected && (
-              <>
-                <SendEth />
-                <Button
-                  onClick={sendTx}
-                  disabled={!isConnected || isSendTxPending}
-                  isLoading={isSendTxPending}
-                  className="w-full"
-                >
-                  Send Transaction (contract)
-                </Button>
-                {isSendTxError && renderError(sendTxError)}
-                {txHash && (
-                  <div className="text-xs w-full">
-                    <div>Hash: {truncateAddress(txHash)}</div>
-                    <div>
-                      Status:{" "}
-                      {isConfirming
-                        ? "Confirming..."
-                        : isConfirmed
-                        ? "Confirmed!"
-                        : "Pending"}
-                    </div>
-                  </div>
-                )}
-                <Button
-                  onClick={signTyped}
-                  disabled={!isConnected || isSignTypedPending}
-                  isLoading={isSignTypedPending}
-                  className="w-full"
-                >
-                  Sign Typed Data
-                </Button>
-                {isSignTypedError && renderError(signTypedError)}
-                <Button
-                  onClick={handleSwitchChain}
-                  disabled={isSwitchChainPending}
-                  isLoading={isSwitchChainPending}
-                  className="w-full"
-                >
-                  Switch to {nextChain.name}
-                </Button>
-                {isSwitchChainError && renderError(switchChainError)}
-              </>
-            )}
-          </div>
-        )}
-
-        <Footer
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          showWallet={USE_WALLET}
-        />
+      {/* Stats */}
+      <div style={{ marginBottom: 16 }}>
+        <span style={{ marginRight: 16 }}>Time: {elapsed}s</span>
+        <span style={{ marginRight: 16 }}>Moves: {moves}</span>
+        <span style={{ marginRight: 16 }}>Current Points: {points}</span>
+        <span style={{ fontWeight: 'bold' }}>Total Score: {totalScore}</span>
       </div>
+
+      {/* Controls */}
+      <div>
+        <button style={buttonStyle} onClick={startGame}>
+          Start Game
+        </button>
+        <button
+          style={{ ...buttonStyle, background: '#fff', color: '#4CAF50', border: '1px solid #4CAF50' }}
+          onClick={resetGame}
+        >
+          Reset
+        </button>
+        <button
+          style={{ ...buttonStyle, background: '#FFA500', marginLeft: 8 }}
+          onClick={() => {
+            stopTimer()
+            setSavedPoints(points)
+            setSubmitted(true)
+            alert(`Points saved: ${points}`)
+          }}
+          disabled={submitted || !running}
+        >
+          Submit Points
+        </button>
+      </div>
+
+      {/* Saved Points */}
+      {savedPoints !== null && (
+        <div style={{ marginTop: 16, fontWeight: 'bold' }}>Saved Points: {savedPoints}</div>
+      )}
     </div>
-  );
+  )
 }
 
-function SignEvmMessage() {
-  const { isConnected } = useAccount();
-  const { connectAsync } = useConnect();
-  const {
-    signMessage,
-    data: signature,
-    error: signError,
-    isError: isSignError,
-    isPending: isSignPending,
-  } = useSignMessage();
-
-  const handleSignMessage = useCallback(async () => {
-    if (!isConnected) {
-      await connectAsync({
-        chainId: base.id,
-        connector: config.connectors[0],
-      });
-    }
-
-    signMessage({ message: "Hello from Frames v2!" });
-  }, [connectAsync, isConnected, signMessage]);
-
-  return (
-    <>
-      <Button
-        onClick={handleSignMessage}
-        disabled={isSignPending}
-        isLoading={isSignPending}
-      >
-        Sign Message
-      </Button>
-      {isSignError && renderError(signError)}
-      {signature && (
-        <div className="mt-2 text-xs">
-          <div>Signature: {signature}</div>
-        </div>
-      )}
-    </>
-  );
+const buttonStyle: React.CSSProperties = {
+  background: '#4CAF50',
+  color: 'white',
+  padding: '8px 16px',
+  borderRadius: 8,
+  border: 'none',
+  cursor: 'pointer',
+  margin: '4px',
 }
-
-function SendEth() {
-  const { isConnected, chainId } = useAccount();
-  const {
-    sendTransaction,
-    data,
-    error: sendTxError,
-    isError: isSendTxError,
-    isPending: isSendTxPending,
-  } = useSendTransaction();
-
-  const { isLoading: isConfirming, isSuccess: isConfirmed } =
-    useWaitForTransactionReceipt({
-      hash: data,
-    });
-
-  const toAddr = useMemo(() => {
-    // Protocol guild address
-    return chainId === base.id
-      ? "0x32e3C7fD24e175701A35c224f2238d18439C7dBC"
-      : "0xB3d8d7887693a9852734b4D25e9C0Bb35Ba8a830";
-  }, [chainId]);
-
-  const handleSend = useCallback(() => {
-    sendTransaction({
-      to: toAddr,
-      value: 1n,
-    });
-  }, [toAddr, sendTransaction]);
-
-  return (
-    <>
-      <Button
-        onClick={handleSend}
-        disabled={!isConnected || isSendTxPending}
-        isLoading={isSendTxPending}
-      >
-        Send Transaction (eth)
-      </Button>
-      {isSendTxError && renderError(sendTxError)}
-      {data && (
-        <div className="mt-2 text-xs">
-          <div>Hash: {truncateAddress(data)}</div>
-          <div>
-            Status:{" "}
-            {isConfirming
-              ? "Confirming..."
-              : isConfirmed
-              ? "Confirmed!"
-              : "Pending"}
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-const renderError = (error: Error | null) => {
-  if (!error) return null;
-  if (error instanceof BaseError) {
-    const isUserRejection = error.walk(
-      (e) => e instanceof UserRejectedRequestError
-    );
-
-    if (isUserRejection) {
-      return <div className="text-red-500 text-xs mt-1">Rejected by user.</div>;
-    }
-  }
-
-  return <div className="text-red-500 text-xs mt-1">{error.message}</div>;
-};
