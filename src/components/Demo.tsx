@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, MouseEvent } from 'react'
+'use client'
+
+import { useEffect, useRef, useState, MouseEvent, useCallback } from 'react'
 import { ethers } from 'ethers'
 
 type Card = {
   row: number
   col: number
-  value: number | string
+  value: number
   flipped: boolean
   matched: boolean
 }
@@ -43,8 +45,8 @@ export default function Demo() {
       await provider.send('eth_requestAccounts', [])
       const signer = await provider.getSigner()
       setProviderAddress(await signer.getAddress())
-    } catch (e: any) {
-      alert('Wallet connection failed: ' + e.message)
+    } catch (e: unknown) {
+      if (e instanceof Error) alert('Wallet connection failed: ' + e.message)
     }
   }
 
@@ -54,43 +56,12 @@ export default function Demo() {
   }
 
   /** GAME FUNCTIONS **/
-  const resetGame = (): void => {
-    stopTimer()
-    const arr = createCards()
-    setCards(arr)
-    setFlipped([])
-    setMatchedCount(0)
-    setMoves(0)
-    setElapsed(0)
-    setPoints(0)
-    setRunning(false)
-    setSubmitted(false)
-    setSavedPoints(null)
-  }
-
-  const startGame = (): void => {
-    resetGame()
-    setRunning(true)
-    startTimer()
-  }
-
-  const startTimer = (): void => {
-    startRef.current = Date.now()
-    timerRef.current = window.setInterval(() => {
-      setElapsed(Number(((Date.now() - startRef.current) / 1000).toFixed(1)))
-    }, 100)
-  }
-
-  const stopTimer = (): void => {
-    if (timerRef.current !== null) window.clearInterval(timerRef.current)
-    timerRef.current = null
-  }
-
   const createCards = (): Card[] => {
     const total = rows * cols
     const vals: number[] = []
     for (let i = 1; i <= total / 2; i++) vals.push(i, i)
     vals.sort(() => Math.random() - 0.5)
+
     const arr: Card[] = []
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
@@ -100,17 +71,19 @@ export default function Demo() {
     return arr
   }
 
-  const drawCards = (): void => {
+  const drawCards = useCallback((): void => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     cards.forEach(card => {
       const x = card.col * cardSize
       const y = card.row * cardSize
       ctx.fillStyle = card.flipped || card.matched ? '#4CAF50' : '#555'
       ctx.fillRect(x + 6, y + 6, cardSize - 12, cardSize - 12)
+
       if (card.flipped || card.matched) {
         ctx.fillStyle = 'white'
         ctx.font = `${Math.floor(cardSize / 3)}px Arial`
@@ -119,7 +92,7 @@ export default function Demo() {
         ctx.fillText(String(card.value), x + cardSize / 2, y + cardSize / 2)
       }
     })
-  }
+  }, [cards, cardSize])
 
   const getCardAt = (x: number, y: number): Card | undefined => {
     const col = Math.floor(x / cardSize)
@@ -129,7 +102,8 @@ export default function Demo() {
 
   const handleCanvasClick = (e: MouseEvent<HTMLCanvasElement>): void => {
     if (!running) return
-    const rect = canvasRef.current!.getBoundingClientRect()
+    const rect = canvasRef.current?.getBoundingClientRect()
+    if (!rect) return
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
     const card = getCardAt(x, y)
@@ -160,7 +134,6 @@ export default function Demo() {
       })
       setCards(copy)
       setMatchedCount(prev => prev + 2)
-
       const newPoints = points + 10
       setPoints(newPoints)
       setTotalScore(prev => prev + 10)
@@ -181,6 +154,37 @@ export default function Demo() {
     setFlipped([])
   }
 
+  const resetGame = (): void => {
+    stopTimer()
+    setCards(createCards())
+    setFlipped([])
+    setMatchedCount(0)
+    setMoves(0)
+    setElapsed(0)
+    setPoints(0)
+    setRunning(false)
+    setSubmitted(false)
+    setSavedPoints(null)
+  }
+
+  const startGame = (): void => {
+    resetGame()
+    setRunning(true)
+    startTimer()
+  }
+
+  const startTimer = (): void => {
+    startRef.current = Date.now()
+    timerRef.current = window.setInterval(() => {
+      setElapsed(Number(((Date.now() - startRef.current) / 1000).toFixed(1)))
+    }, 100)
+  }
+
+  const stopTimer = (): void => {
+    if (timerRef.current !== null) window.clearInterval(timerRef.current)
+    timerRef.current = null
+  }
+
   /** EFFECTS **/
   useEffect(() => {
     const canvas = canvasRef.current
@@ -190,7 +194,7 @@ export default function Demo() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => drawCards(), [cards, cardSize])
+  useEffect(() => drawCards(), [drawCards])
 
   /** RENDER **/
   return (
